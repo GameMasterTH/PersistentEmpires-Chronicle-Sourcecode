@@ -1,0 +1,284 @@
+﻿using PersistentEmpiresLib;
+using PersistentEmpiresLib.NetworkMessages.Client;
+using PersistentEmpiresLib.PersistentEmpiresMission.MissionBehaviors;
+using System;
+using System.Collections.Generic;
+using TaleWorlds.Core;
+using TaleWorlds.Library;
+using TaleWorlds.Localization;
+using TaleWorlds.MountAndBlade;
+using TaleWorlds.MountAndBlade.Diamond;
+using TaleWorlds.MountAndBlade.Multiplayer.GauntletUI.Mission;
+using TaleWorlds.MountAndBlade.Multiplayer.ViewModelCollection;
+using TaleWorlds.MountAndBlade.Source.Missions;
+using TaleWorlds.MountAndBlade.ViewModelCollection.EscapeMenu;
+using PersistentEmpiresLib.Helpers;
+using PersistentEmpires.Views.Views;
+using TaleWorlds.Core.ViewModelCollection.Information;
+using System.Linq;
+
+namespace PersistentEmpires.Views.Views
+{
+    public class PEEscapeMenu : MissionGauntletMultiplayerEscapeMenu
+    {
+        private MissionOptionsComponent _missionOptionsComponent;
+        private FactionUIComponent _factionManagementComponent;
+        private FactionPollComponent _factionPollComponent;
+        private PersistentEmpireRepresentative _persistentEmpireRepresentative;
+        private ProximityChatComponent _proximityChatComponent;
+        private AdminClientBehavior _adminBehavior;
+        public PEEscapeMenu(string gameType) : base(gameType)
+        {
+
+        }
+
+        public override bool OnEscape()
+        {
+            PEInventoryScreen inventoryScreen = base.Mission.GetMissionBehavior<PEInventoryScreen>();
+            if (inventoryScreen.IsActive)
+            {
+                inventoryScreen.CloseInventory();
+                return false;
+            }
+            return base.OnEscape();
+        }
+
+        public override void OnMissionScreenInitialize()
+        {
+            base.OnMissionScreenInitialize();
+            this._missionOptionsComponent = base.Mission.GetMissionBehavior<MissionOptionsComponent>();
+            this._factionManagementComponent = base.Mission.GetMissionBehavior<FactionUIComponent>();
+            this._factionPollComponent = base.Mission.GetMissionBehavior<FactionPollComponent>();
+            this._adminBehavior = base.Mission.GetMissionBehavior<AdminClientBehavior>();
+            this._proximityChatComponent = base.Mission.GetMissionBehavior<ProximityChatComponent>();
+            TextObject title = GameTexts.FindText("EscapeMenuCaption", null);
+            this.DataSource = new MPEscapeMenuVM(null, title);
+        }
+
+        protected override List<EscapeMenuItemVM> GetEscapeMenuItems()
+        {
+            List<EscapeMenuItemVM> list = new List<EscapeMenuItemVM>();
+            _persistentEmpireRepresentative = GameNetwork.MyPeer.GetComponent<PersistentEmpireRepresentative>();
+            list.Add(new EscapeMenuItemVM(new TextObject("{=e139gKZc}Return to the Game", null), delegate (object o)
+            {
+                base.OnEscapeMenuToggled(false);
+            }, null, () => new Tuple<bool, TextObject>(false, TextObject.Empty), false));
+            list.Add(new EscapeMenuItemVM(new TextObject("{=NqarFr4P}Options", null), delegate (object o)
+            {
+                base.OnEscapeMenuToggled(false);
+                MissionOptionsComponent missionOptionsComponent = this._missionOptionsComponent;
+                if (missionOptionsComponent == null)
+                {
+                    return;
+                }
+                missionOptionsComponent.OnAddOptionsUIHandler();
+            }, null, () => new Tuple<bool, TextObject>(false, TextObject.Empty), false));
+            if (this._proximityChatComponent != null)
+            {
+                list.Add(new EscapeMenuItemVM(GameTexts.FindText("EscapeMenuVC", null), delegate (object o)
+                {
+                    base.OnEscapeMenuToggled(false);
+                    this._proximityChatComponent.HandleOption();
+                }, null, () => new Tuple<bool, TextObject>(false, TextObject.Empty), false));
+            }
+            if (_persistentEmpireRepresentative != null && _persistentEmpireRepresentative.IsAdmin)
+            {
+                list.Add(new EscapeMenuItemVM(GameTexts.FindText("EscapeMenuAdmin", null), delegate (object o)
+                {
+                    base.OnEscapeMenuToggled(false);
+                    this._adminBehavior.HandleAdminPanelClick();
+
+                }, null, () => new Tuple<bool, TextObject>(false, TextObject.Empty), false));
+            }
+
+            if (_persistentEmpireRepresentative != null && _persistentEmpireRepresentative.GetFaction() != null && (_persistentEmpireRepresentative.GetFaction().lordId == GameNetwork.MyPeer.VirtualPlayer.ToPlayerId() || _persistentEmpireRepresentative.GetFaction().marshalls.Contains(GameNetwork.MyPeer.VirtualPlayer.ToPlayerId())))
+            {
+                list.Add(new EscapeMenuItemVM(GameTexts.FindText("EscapeMenuFaction", null), delegate (object o)
+                {
+                    base.OnEscapeMenuToggled(false);
+                    if (this._factionManagementComponent == null)
+                    {
+                        return;
+                    }
+                    this._factionManagementComponent.OnFactionManagementClickHandler();
+                }, null, () => new Tuple<bool, TextObject>(false, TextObject.Empty), false));
+            }
+            if (_persistentEmpireRepresentative != null && _persistentEmpireRepresentative.CanUsePoll && _persistentEmpireRepresentative.GetFactionIndex() > 1)
+            {
+                list.Add(new EscapeMenuItemVM(GameTexts.FindText("EscapeMenuPollLord", null), delegate (object o)
+                {
+                    base.OnEscapeMenuToggled(false);
+                    if (this._factionManagementComponent == null)
+                    {
+                        return;
+                    }
+                    MissionPeer myPeer = GameNetwork.MyPeer.GetComponent<MissionPeer>();
+                    // this._factionPollComponent.RequestLordPlayerPoll(GameNetwork.MyPeer);
+                    this._factionManagementComponent.OnFactionLordPollClickHandler();
+                }, null, () => new Tuple<bool, TextObject>(false, TextObject.Empty), false));
+            }
+            if (_persistentEmpireRepresentative != null && _persistentEmpireRepresentative.CanUseSuicide)
+            {
+                list.Add(new EscapeMenuItemVM(new TextObject("Commit Suicide", null), delegate (object o)
+                {
+                    InquiryData inquiry = new InquiryData("Are you sure ?", "You will die and lose your items. Are you sure ?", true, true, "Yes", "No", () =>
+                        {
+                            base.OnEscapeMenuToggled(false);
+                            if (Agent.Main != null)
+                            {
+                                GameNetwork.BeginModuleEventAsClient();
+                                GameNetwork.WriteMessage(new RequestSuicide());
+                                GameNetwork.EndModuleEventAsClient();
+                            }
+                        },
+                    () =>
+                    {
+
+                    });
+                    InformationManager.ShowInquiry(inquiry);
+                }, null, () => new Tuple<bool, TextObject>(false, TextObject.Empty), false));
+            }
+            if (_persistentEmpireRepresentative != null && _persistentEmpireRepresentative.CanUseChangeColors)
+            {
+                if (GameNetwork.MyPeer.GetComponent<MissionPeer>()?.ControlledAgent != null)
+                {
+                    list.Add(new EscapeMenuItemVM(new TextObject("Change colors", null), delegate (object o)
+                    {
+                        ExecuteChangeColor();
+                        base.OnEscapeMenuToggled(false);
+                    }, null, () => new Tuple<bool, TextObject>(false, TextObject.Empty), false));
+                }
+            }
+            //list.Add(new EscapeMenuItemVM(new TextObject("Respawn", null), delegate (object o)
+            //{
+            //    base.OnEscapeMenuToggled(false);
+            //    if (Agent.Main != null)
+            //    {
+            //        GameNetwork.BeginModuleEventAsClient();
+            //        GameNetwork.WriteMessage(new RequestRespawn("me"));
+            //        GameNetwork.EndModuleEventAsClient();
+            //    }
+            //}, null, () => new Tuple<bool, TextObject>(false, TextObject.Empty), false));
+
+            //if (_persistentEmpireRepresentative != null && _persistentEmpireRepresentative.IsAdmin)
+            //{
+            //    //
+            //    var text = AdminClientBehavior.IsVisible ? GameTexts.FindText("EscapeMenBecomeInvisible", null) : GameTexts.FindText("EscapeMenBecomeVisible", null);
+            //    list.Add(new EscapeMenuItemVM(text, delegate (object o)
+            //    {
+            //        base.OnEscapeMenuToggled(false);
+            //        this._adminBehavior.ToggleInvisible();
+
+            //    }, null, () => new Tuple<bool, TextObject>(false, TextObject.Empty), false));
+
+            //    list.Add(new EscapeMenuItemVM(GameTexts.FindText("EscapeMenUnban", null), delegate (object o)
+            //    {
+            //        base.OnEscapeMenuToggled(false);
+            //        this._adminBehavior.HandleUnbanPlayerClick();
+
+            //    }, null, () => new Tuple<bool, TextObject>(false, TextObject.Empty), false));
+            //}
+
+            list.Add(new EscapeMenuItemVM(new TextObject("{=InGwtrWt}Quit", null), delegate (object o)
+            {
+
+                InformationManager.ShowInquiry(
+                    new InquiryData(
+                        new TextObject("{=InGwtrWt}Quit", null).ToString(),
+                        new TextObject("{=lxq6SaQn}Are you sure want to quit?", null).ToString(),
+                        true,
+                        true,
+                        GameTexts.FindText("str_yes", null).ToString(),
+                        GameTexts.FindText("str_no", null).ToString(),
+                        delegate ()
+                        {
+                            LobbyClient gameClient = NetworkMain.GameClient;
+                            if (gameClient.CurrentState == LobbyClient.State.InCustomGame)
+                            {
+                                gameClient.QuitFromCustomGame();
+                                return;
+                            }
+                            if (gameClient.CurrentState == LobbyClient.State.HostingCustomGame)
+                            {
+                                gameClient.EndCustomGame();
+                                return;
+                            }
+                            gameClient.QuitFromMatchmakerGame();
+                        }, null, "", 0f, null), false, false);
+            }, null, () => new Tuple<bool, TextObject>(false, TextObject.Empty), false));
+            return list;
+        }
+        
+        private static List<InquiryElement> InquiryElements = SetUpColorList();
+        private static int? choosenPrimaryColor = null;
+        private static int? choosenSecondaryColor = null;
+
+        private static List<InquiryElement> SetUpColorList()
+        {
+            var tmp = new List<InquiryElement>();
+
+            for (int i = 0; i < 194; i++)
+            {
+                tmp.Add(new InquiryElement(i, $"{i}", new ImageIdentifier(Banner.CreateOneColoredEmptyBanner(i))));
+            }
+
+            return tmp;
+        }
+
+        private void ExecuteChangeColor()
+        {
+            if (InquiryElements == null)
+            {
+                SetUpColorList();
+            }
+
+            MBInformationManager.ShowMultiSelectionInquiry(
+                new MultiSelectionInquiryData("Choose color"
+                    , "Choose primary color for current character"
+                    , InquiryElements
+                    , true
+                    , 1
+                    , 1
+                    , "Next"
+                    , "Cancel"
+                    , DoSelectPrimary
+                    , DoCancelAction));
+        }
+
+        private void DoCancelAction(List<InquiryElement> list)
+        {
+            choosenPrimaryColor = null;
+            choosenSecondaryColor = null;
+        }
+
+        private void DoSelectPrimary(List<InquiryElement> list)
+        {
+            choosenPrimaryColor = (int)list.FirstOrDefault().Identifier;
+
+            MBInformationManager.ShowMultiSelectionInquiry(
+                new MultiSelectionInquiryData("Choose color"
+                    , "Choose secondary color for current character"
+                    , InquiryElements
+                    , true
+                    , 1
+                    , 1
+                    , "Next"
+                    , "Cancel"
+                    , DoSelectSecondary
+                    , DoCancelAction));
+        }
+
+        private void DoSelectSecondary(List<InquiryElement> list)
+        {
+            choosenSecondaryColor = (int)list.FirstOrDefault().Identifier;
+            var message = new ChangeCustomColors(choosenPrimaryColor.Value, choosenSecondaryColor.Value);
+
+            GameNetwork.BeginModuleEventAsClient();
+            GameNetwork.WriteMessage(message);
+            GameNetwork.EndModuleEventAsClient();
+
+            choosenPrimaryColor = null;
+            choosenSecondaryColor = null;
+        }
+    }
+} 
